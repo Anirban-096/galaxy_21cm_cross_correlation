@@ -47,6 +47,7 @@ def CrossCorr2pt(bins, boxsize, pos, delta, thickness, threads=32):
     xi : float array of shape (m,)
         The 2-point cross-correlation function (2PCF) between the tracer positions and the field, computed at each of the m radial bins.
     '''
+    print(" ~~~~~~~~~~~~~~ New Version [AC] ~~~~~~~~~~~~~~~~~~~~ ")
     # Calculating the number of grid points along each axis of the field delta
     shape = np.shape(delta)
     if len(shape) != 3 or shape[0] != shape[1] or shape[1] != shape[2]:
@@ -237,7 +238,7 @@ def tracer_field_cross_CDF(data_pos, bins, delta_matter, matter_grid, query_type
     p_gtr_k_dt: float array of shape ((len(bins), len(kNN)))
         the joint probability of finding at least 'k' tracers within the given spherical bin and the smoothed density field               exceeding the given density threshold
     '''
-    
+    print(" ~~~~~~~~~~~~~~ New Version [AC] ~~~~~~~~~~~~~~~~~~~~ ")    
     #-------------------------------------------------------------------------------------------------------
     #Step 0: Making the box containing the tracers (galaxies) periodic, if not already
     data_pos = data_pos % boxsize
@@ -246,7 +247,7 @@ def tracer_field_cross_CDF(data_pos, bins, delta_matter, matter_grid, query_type
     
     if query_type == 'grid':
         print(" bufferlength (cMpc/h) = ",bufferlength,"\n")
-        print(" subboxsize (cMpc/h) = ",subboxsize,"\n")
+        print(" galsubboxsize (cMpc/h) = ",subboxsize,"\n")
         #Creating a grid of query points
         # The galaxy region spans [bufferlength, subboxsize + bufferlength] along each axis.
         # To ensure that query points lie strictly inside this region (not touching boundaries and being atleast away by 'bufferlength'),
