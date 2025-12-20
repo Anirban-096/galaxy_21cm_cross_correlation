@@ -1,0 +1,83 @@
+Information Sheet for USER
+----------------------------
+
+1. Simulation Details :
+
+    omega_m = 0.308
+    omega_l = 0.692
+    h = 0.678
+    omega_b = 0.04
+    sigma_8 = 0.829
+    ns = 0.961
+    YHe = 0.24
+
+    Box Length = 160 cMpc/h
+
+    Grid Cell Length = 2 cMpc/h
+
+    No of grids along each direction (ngrid) = 80 
+
+    So, there are 80^3 grid cells in total 
+
+2. Redshift at which files are shared :
+
+    z = 9.0 
+    Mass Averaged Ionized Fraction =  0.162
+    Number of galaxies  = 189692
+
+    z = 8.0 
+    Mass Averaged Ionized Fraction =  0.303
+    Number of galaxies  = 420462
+
+    z = 7.0 
+    Mass Averaged Ionized Fraction =  0.543
+    Number of galaxies  = 830634
+
+    z = 6.0 
+    Mass Averaged Ionized Fraction =  0.927
+    Number of galaxies  = 1459007
+
+    Mass Averaged Ionized fraction = Mean of " QHII_cell * ( 1 + densitycontrast_cell) "  over all cells 
+    where QHII_cell is the ionized fraction and densitycontrast_cell is the density contrast of the cell 
+
+ 
+3. Description of individual files shared for each redshift bin :
+
+    A. Ionized fraction field 
+
+    Contains the ionization fraction in each cell of the simulation box (unitless) : qion_arr 
+
+
+    B. Density Contrast field  
+
+    Contains the density contrast in each cell of the simulation box (unitless) : densitycontrast_arr 
+
+
+    C. Galaxy Catalogue
+
+    (i) galaxyCatalog_UVmagnitudes_z***.**.npz 
+
+        Contains the UV magnitude of each galaxy (units= AB mag) : MUV_arr
+
+    (ii) galaxyCatalog_Xposition_z***.**.npz 
+
+        Contains the X-coordinate position of each galaxy (units= cMpc/h) : xpos_arr 
+
+    (iii) galaxyCatalog_Yposition_z***.**.npz 
+
+        Contains the Y-coordinate position of each galaxy (units= cMpc/h) : ypos_arr 
+
+    (iv) galaxyCatalog_Zposition_z***.**.npz 
+
+        Contains the Z-coordinate position of each galaxy (units= cMpc/h) : zpos_arr 
+
+    So for the Mth galaxy (i.e., array_index = M-1), 
+    the set of its properties are MUV_arr[M-1] ; xpos_arr[M-1] ; ypos_arr[M-1] ; zpos_arr[M-1]
+
+4. Other Information :
+
+    A seperate folder named "extra_plots" contains some visualization plots, such as : 
+
+         a. The luminosity function of the galaxies in the mock catalog at different redshifts  
+         b. Dimmensionless cross-power spectrum of the mass-averaged neutral hydrogen field and galaxy field at different redshifts. [Definitions used for the calculation are given in a seperate image file] 
+    
