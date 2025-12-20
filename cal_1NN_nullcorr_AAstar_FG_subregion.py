@@ -8,9 +8,9 @@ import matplotlib.pyplot as plt
 from scipy.stats import chi2
 import time
 import argparse
-### Present as a separate .py file in the directory : kNN_2PCF_Project_Gadget2/
-import crosscorrelation_utils as cc
 
+### Present as a separate .py file in this current directory 
+import crosscorrelation_utils as cc
 
 
 '''
@@ -20,12 +20,12 @@ import crosscorrelation_utils as cc
 '''
 
 
+
 # Cosmological Parameters from GADGET-2
 
 omega_b=0.04
 omega_m=0.308     
 h = 0.678
-
 ngrid = 80                              # Number of grid points along each axis 
 grid_cell_size = 2                       # Grid cell size in cMpc/h
 
@@ -41,6 +41,7 @@ tobs=120 ## hours
 
 
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--n_null",
@@ -51,23 +52,29 @@ parser.add_argument(
 args = parser.parse_args()
 n_null = args.n_null
 
+
 print("USER INPUT : Redshift z = ",z)
 print("USER INPUT : n_null = ",n_null)
 print("USER INPUT : Total 21cm obs. hrs. = ",tobs)
 
-###### Parameters for 2pt cross correlation function 
-
-thickness = 1 # Mpc/h
+###### Parameters for kNN-CDF cross correlation function 
 rmin=4
 rmax=12
 delta_r = 1
-
 bin_len = int((rmax-rmin)/delta_r) + 1
-bins_xi = np.linspace(rmin,rmax,bin_len)
-print("USER INPUT : radial_bins = ", bins_xi)
+n_data = 1              ### number of actual catalog realisation
+kNN = [1]
+threshold=75
+
+nquery = 100  # number of points along each dimension of the query grid
 
 
+bins_knn = np.zeros((bin_len, 1))
+bins_knn[:,0] =  np.linspace(rmin,rmax,bin_len)
+print("USER INPUT : radial_bins = ", bins_knn[:,0])
+print("USER INPUT : nquery = ",nquery)
 current_dir=os.getcwd()
+
 
 #####################################################################
 
@@ -76,8 +83,6 @@ current_dir=os.getcwd()
 ###################    DATA LOADING    ##############################
 #####################################################################
 '''
-
-
 
 ##################################################
 # array of seeds (for creating random catalogs) 
@@ -369,16 +374,117 @@ def wedge_filter(Tb_field, C, cellsize=2.0):
 
 #####################################################################
 
+
 # Create a figure with 1 row and 2 columns
 fig, axes = plt.subplots(1, 1, figsize=(8, 7))
 fig2, axes2 = plt.subplots(1, 1, figsize=(8, 7))
 fig3, axes3 = plt.subplots(1, 1, figsize=(8, 7))
 
+
 '''
 #####################################################################
-###################   2-POINT CALCULATION ###########################
+###################   1NN-CDF CALCULATION ###########################
 #####################################################################
 '''
+
+
+# Galaxy count per set for the subbox region (manually)
+if log10_lum_min == 41.5:
+    n_gal = 943     # 8 sets of 943 galaxies : 2 dropped → n_gal 
+elif log10_lum_min == 42.5:
+    n_gal = int(n_gal_total)
+else:
+    raise ValueError(f"Unsupported log10_lum_min value: {log10_lum_min}")
+
+
+print("[1NN-CDF] n_gal for each set of 1NN =",n_gal)
+print("[1NN-CDF] n_gal_total in sub-box = ",n_gal_total)
+
+
+def get_kNN_from_catalog(bins_knn, boxsize, pos, delta, matter_grid, query_type, query_grid, threshold, kNN,seedvalue):
+    # Calculate the number of full sets
+    n_full_sets = n_gal_total // n_gal
+    # Calculate remainder for the last set
+    remainder = n_gal_total % n_gal
+    print("[get_kNN_from_catalog] n_full_sets = ",n_full_sets)
+    print("[get_kNN_from_catalog] remainder = ",remainder)
+    # Create array of set sizes
+    if remainder == 0:
+        gal_per_set = np.full(n_full_sets, n_gal, dtype=int)
+    else:
+        gal_per_set = np.full(n_full_sets, n_gal, dtype=int)
+        # excluding the excess galaxies
+        #gal_per_set = np.append(gal_per_set, remainder)  # last set
+
+    print("[get_kNN_from_catalog] Number of galaxies in each set = ", gal_per_set)
+    print(f"[get_kNN_from_catalog] Check: total={n_gal_total}, sum_over_sets={gal_per_set.sum()}")
+
+    if gal_per_set.sum() != n_gal_total:
+        print(f"[get_kNN_from_catalog] Total number of galaxies in sets does not match n_gal_total! difference={gal_per_set.sum() - n_gal_total}!")
+
+
+
+    delta_threshold = {'type': 'percentile', 'value': threshold}
+
+    '''
+    assert sum(gal_per_set) <= len(pos), (
+        f"Not enough tracers in 'pos' for unique sampling: "
+        f"need {sum(gal_per_set)}, but only {len(pos)} available."
+    )
+    '''
+    remaining = np.arange(len(pos))  # indices of remaining tracers
+    subsamples = []
+
+    np.random.seed(seedvalue)
+
+    for size in gal_per_set:
+        # Randomly choose indices from the remaining pool
+        chosen_idx = np.random.choice(remaining, size=size, replace=False)
+        # Select the corresponding rows from pos
+        subsamples.append(pos[chosen_idx])
+        # Remove chosen indices from the remaining pool
+        remaining = np.setdiff1d(remaining, chosen_idx, assume_unique=True)
+
+    # Stack all subsamples into one array
+    all_subsamples = np.vstack(subsamples)   # shape = (sum(gal_per_set), 3)
+    print("[get_kNN_from_catalog] all_subsamples.shape = ",all_subsamples.shape)
+    # Check for uniqueness
+    # Convert to tuples for easy row-wise comparison
+    unique_rows = np.unique(all_subsamples, axis=0)
+    if len(unique_rows) == len(all_subsamples):
+        print("[get_kNN_from_catalog] All subsamples are unique (no duplicate tracers).")
+    else:
+        print("[get_kNN_from_catalog] Duplicate tracers found across subsamples!")
+
+    psi = np.zeros((len(kNN), len(gal_per_set), bin_len))
+
+    for ii in tqdm(range(len(gal_per_set)), desc="Computing kNN CDF for each sub-set"):
+
+        pos_sample = subsamples[ii]  #float array of shape (ntracers_in_set, 3)
+        cdf_tracer, cdf_field, cdf_joint = cc.tracer_field_cross_CDF(
+            pos_sample,  
+            bins_knn,         
+            delta,       
+            matter_grid,  
+            query_type,  
+            query_grid,  
+            delta_threshold,  
+            boxsize, 
+            galsubboxsize,     
+            kNN, 
+            bufferlength,        
+            n_threads=32    
+        )
+
+        for k in range(len(kNN)):
+            psi[k, ii] = cdf_joint[:, k] / (cdf_tracer[:, k] * cdf_field)   ## float array of shape (len(kNN), n_sets, len(bins))
+
+    # Average along the ii axis (axis=1)
+    psi_avg = np.mean(psi, axis=1)
+
+    print("[get_kNN_from_catalog] Shape of psi_avg:", psi_avg.shape,"\n")  ## should be a float array of shape (len(kNN), len(bins))
+
+    return psi_avg
 
 
 
@@ -387,9 +493,9 @@ start_time = time.time()
 
 # Computing the null cross-correlation for random galaxy positions and ONLY 21cm noise with wedge filtering
 
-xi_null = np.zeros((n_null, bin_len))
+psi_null = np.zeros((len(kNN), n_null, bin_len))
 
-for i in tqdm(range(n_null), desc="Computing 2PCF for random galaxies"):
+for i in tqdm(range(n_null), desc="Computing kNN CDF for random galaxies"):
 
     seedvalue = seed_arr[i]  # ensure a new seed used for each iteration
 
@@ -411,7 +517,7 @@ for i in tqdm(range(n_null), desc="Computing 2PCF for random galaxies"):
 
     ### pick out the noise from the full cube corresponding to the region : [0, bufferlength + galsubboxsize + bufferlength] = [0, Tb21cm_subboxsize] 
     del_T21_noise_sample_filtered_subbox = select_field_subbox(del_T21_noise_sample_filtered_full,boxsize=fullbox_len, subboxsize=Tb21cm_subboxsize)
-    
+
     del_T21_noise_sample_filtered_subbox = del_T21_noise_sample_filtered_subbox - np.mean(del_T21_noise_sample_filtered_subbox)
 
     ''' Random galaxies  ''' 
@@ -425,12 +531,26 @@ for i in tqdm(range(n_null), desc="Computing 2PCF for random galaxies"):
     # i.e. the galaxies should span [2*bufferlength, galsubboxsize] along each axis.
     #pos_sample_subbox = np.random.uniform(low=2*bufferlength,high=galsubboxsize,size=(n_gal_total, 3)).astype(np.float32)
 
-    n_gal = pos_sample_subbox.shape[0] 
-    print("[Random Galaxies] n_gal within boundary of subbox  =",n_gal)
+    num_rand_gal = pos_sample_subbox.shape[0] 
+    print("[Random Galaxies] n_gal within boundary of subbox  =",num_rand_gal)
     print("[Random Galaxies] x-min, x-max:", pos_sample_subbox[:,0].min(), pos_sample_subbox[:,0].max())
     print("[Random Galaxies] y-min, y-max:", pos_sample_subbox[:,1].min(), pos_sample_subbox[:,1].max())
     print("[Random Galaxies] z-min, z-max:", pos_sample_subbox[:,2].min(), pos_sample_subbox[:,2].max())
-    xi_null[i] = cc.CrossCorr2pt(bins_xi, Tb21cm_subboxsize, pos_sample_subbox, del_T21_noise_sample_filtered_subbox, thickness)
+
+
+
+    # The galaxy sub-region spans from [buffer_length, buffer_length + gal_subbox_size].
+    # We choose the query grid to span a slightly smaller region,
+    # specifically [2 * buffer_length, gal_subbox_size],
+    # following the convention used in crosscorrelations_utils.py.
+
+    print(f"[1NN-CDF] Using a {nquery}×{nquery}×{nquery} query grid over the restricted galaxy region.")
+
+    psi_null_thisCatalog = get_kNN_from_catalog(bins_knn = bins_knn, boxsize = Tb21cm_subboxsize, pos = pos_sample_subbox, delta = del_T21_noise_sample_filtered_subbox, matter_grid=del_T21_noise_sample_filtered_subbox.shape[0], query_type='grid', query_grid=nquery, threshold=threshold, kNN=kNN,seedvalue=seedvalue)  #array of shape (len(kNN), len(bins))
+
+    # Store in the preallocated array
+    psi_null[:, i, :] = psi_null_thisCatalog  # store along the i axis
+
     print("##################")
 
 
@@ -438,24 +558,29 @@ end_time = time.time()
 elapsed = end_time - start_time
 print(f"Execution time: {elapsed//60:.0f} min {elapsed%60:.2f} sec")
 
+###chisq calculation FOR 1-nn
 
-null = xi_null
-cov_2pt = np.cov(null,rowvar=False,bias=True)
-corrMatrix_2pt = np.corrcoef(null, rowvar=False)
-print("corrMatrix_2pt Min value:", np.min(corrMatrix_2pt))
-print("corrMatrix_2pt Max value:", np.max(corrMatrix_2pt))
+null = psi_null[0]  ## picks out the 1NN measurements - shape :  (n_null, bin_len)
 
+cov_1nn = np.cov(null,rowvar=False,bias=True)
+corrMatrix_1nn = np.corrcoef(null, rowvar=False)
+print("[nquery = "+str(nquery)+"] corrMatrix_1NN Min value:", np.min(corrMatrix_1nn))
+print("[nquery = "+str(nquery)+"] corrMatrix_1NN Max value:", np.max(corrMatrix_1nn))
 
 hartlap = (n_null-bin_len-2)/(n_null-1)
-c_inv_2pt = hartlap*np.linalg.inv(cov_2pt)
+c_inv_1nn = hartlap*np.linalg.inv(cov_1nn)
+
 
 #### Computing the "mean" null 
-null_2pt = np.mean(xi_null, axis=0)
+null_1nn = np.mean(psi_null[0], axis=0) #shape :  (bin_len,)
 
 
-chi_sq_2pt_null = np.zeros(n_null)
+chi_sq_1nn_null = np.zeros(n_null)
+
+
 for i in range(n_null):
-    chi_sq_2pt_null[i] = (np.transpose(xi_null[i] - null_2pt)).dot(c_inv_2pt).dot(xi_null[i] - null_2pt)
+    chi_sq_1nn_null[i] = (np.transpose(psi_null[0,i] - null_1nn)).dot(c_inv_1nn).dot(psi_null[0,i] - null_1nn)
+
 
 
 '''
@@ -468,55 +593,63 @@ for i in range(n_null):
 ###########################################################################################################################
 ############################## chisquare distribution of the null samples #################################################
 ###########################################################################################################################
+
 ax = axes
 
 # Histogram of null values
-ax.hist(chi_sq_2pt_null, bins=10, color='grey', edgecolor='black', density=True)
+ax.hist(chi_sq_1nn_null, bins=10, color='grey', edgecolor='black', density=True)
 
-chi_sq_2pt_mean = np.mean(chi_sq_2pt_null)
+chi_sq_1nn_mean = np.mean(chi_sq_1nn_null)
+
 # Vertical line for observed chi-sq value
-ax.axvline(chi_sq_2pt_mean, color='blue', linestyle='--', linewidth=2, label=f'Mean $\chi^2$ = {chi_sq_2pt_mean:,.0f}')
+ax.axvline(chi_sq_1nn_mean, color='red', linestyle='--', linewidth=2,
+           label=f'Mean $\chi^2$ = {chi_sq_1nn_mean:,.0f} \n [Percentile = '+str(threshold)+']')
+
+
 
 ax.set_ylim(0.0,0.2)
-#ax.set_xscale('log')
+ax.set_xscale('log')
 ax.set_xlabel(r'$\chi^2$')
 ax.set_ylabel('P($\chi^2$)')
-ax.set_title(r'Region = '+str(region)+r' : $\chi^2$ dist. : 2pt with $N_{\rm gal}$ = ' + str(n_gal)+"; AA* (" +str(tobs)+r"hrs) ; $m_w$ = "+str(slope_wedge))
+ax.set_title(r'Region = '+str(region)+r' : $\chi^2$ dist. : 1NN with $N_{\rm gal,set}$ = ' + str(n_gal)+"; AA* (" +str(tobs)+r"hrs) ; $m_w$ = "+str(slope_wedge))
 ax.legend()
-
+#plt.grid(True, which='both', linestyle='--', alpha=0.6)
 
 
 ###########################################################################################################################
-######################### 2pt cross-correlation function of the null samples ##############################################
+######################### 1NN cross-correlation function of the null samples ##############################################
 ###########################################################################################################################
 
 ax = axes2
 for i in range(n_null):
-    ax.plot(bins_xi, xi_null[i], color='k', alpha=0.05)
+    ax.plot(bins_knn[:, 0], psi_null[0, i], color='k', alpha=0.1)
 
-ax.plot(bins_xi, np.mean(xi_null, axis=0), color='k', ls='dashed', label='Random Galaxies X ONLY 21cm Noise AA* + FG', lw=2)
+ax.plot(bins_knn[:, 0], np.mean(psi_null[0], axis=0), color='k', ls='dashed', label='Random Galaxies X  ONLY 21cm Noise AA* + FG', lw=2)
+
+
 ax.set_xlabel('r (cMpc/h)')
-ax.set_ylabel(r'$\xi(r)$[mK]')
+ax.set_ylabel(r'$\psi_1(r)$')
+
 ax.set_title(r"Region = "+str(region)+r": $N_{\rm gal}$ = " + str(n_gal)+"; AA* (" +str(tobs)+r"hrs) ; $m_w$ = "+str(slope_wedge))
-ax.legend()
+ax.legend(loc='lower right')
 ax.grid(True, color='gray', linestyle='--', linewidth=0.5, alpha=0.7)
 
 
 ###########################################################################################################################
-############################# 2-point correlation matrix of the null samples ##############################################
+############################# 1NN correlation matrix of the null samples ##############################################
 ###########################################################################################################################
 ax = axes3
 
 
-cax = ax.matshow(corrMatrix_2pt, vmax=1, vmin=-1, cmap='coolwarm')
+cax = ax.matshow(corrMatrix_1nn, vmax=1, vmin=-1, cmap='coolwarm')
 fig3.colorbar(cax, ax=ax)  # attach colorbar to this specific ax
 
-ax.set_title(r"[2pt-region] : $N_{\rm real}$ = " + str(n_null)+"; AA* (" +str(tobs)+r"hrs) ; $m_w$ =  "+str(slope_wedge))
+ax.set_title(r"[1NN-region] : $N_{\rm real}$ = " + str(n_null)+"; AA* (" +str(tobs)+r"hrs) ; $m_w$ =  "+str(slope_wedge))
 
 ax.set_xticks(np.arange(bin_len))
 ax.set_yticks(np.arange(bin_len))
-ax.set_xticklabels(bins_xi , rotation=45, ha='left')
-ax.set_yticklabels(bins_xi, rotation=45, ha='right')
+ax.set_xticklabels(bins_knn[:,0] , rotation=45, ha='left')
+ax.set_yticklabels(bins_knn[:,0] , rotation=45, ha='right')
 ax.set_xlabel('r (cMpc/h)')
 ax.set_ylabel('r (cMpc/h)')
 
@@ -528,6 +661,9 @@ fig2.tight_layout()
 fig3.tight_layout()
 
 
+#plt.show()
+
+
 
 
 # Directory to save all figures as pdf
@@ -535,7 +671,7 @@ out_dir_pdf = "./combined_pdf_files_subbox"
 os.makedirs(out_dir_pdf, exist_ok=True)  # Create if not present
 
 # Common filename stem
-stem = f"OIIIcrossxHI_2PCFsigma_Noise{tobs}hrs_AAstar_nreal{n_null}_FGslope{slope_wedge}_region{region}"
+stem = f"OIIIcrossxHI_1NNsigma_Noise{tobs}hrs_AAstar_nreal{n_null}_FGslope{slope_wedge}_region{region}"
 
 # Save figures
 fig.savefig(os.path.join(out_dir_pdf, f"chisq_{stem}.pdf"), bbox_inches='tight')
@@ -550,18 +686,17 @@ filename = os.path.join(out_dir_npz, f"{stem}.npz")
 # Ensure directory exists
 os.makedirs(out_dir_npz, exist_ok=True)
 
-
-
 np.savez(
     filename,
-    corrMatrix_2pt=corrMatrix_2pt,
-    cov_2pt=cov_2pt,
-    xi_null=xi_null,
-    chi_sq_2pt_null=chi_sq_2pt_null,
+    corrMatrix_1nn=corrMatrix_1nn,
+    cov_1nn=cov_1nn,
+    psi_null=psi_null[0], ## picks out the 1NN measurements - shape :  (n_null, bin_len)
+    chi_sq_1nn_null=chi_sq_1nn_null,
     )
 print(f"File saved: {filename}")
 
-plt.show()
+
+#plt.show()
 
 
 
